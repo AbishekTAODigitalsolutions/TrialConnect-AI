@@ -1,0 +1,7 @@
+{
+  "study_id": "STUDY-001",
+  "site_ids": ["SITE-01", "SITE-02", "SITE-03", "SITE-04", "SITE-05"],
+  "patient_count": 20,
+  "synthetic": true,
+  "notes": "The foundation uses synthetic-only patient records."
+}

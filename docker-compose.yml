@@ -1,0 +1,97 @@
+services:
+  clinical-data-store:
+    image: pgvector/pgvector:pg17
+    container_name: clinical-data-store
+    environment:
+      POSTGRES_DB: trialconnect
+      POSTGRES_USER: trialconnect_app
+      POSTGRES_PASSWORD: replace_me
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./clinical-data-store/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  task-broker:
+    image: redis:7-alpine
+    container_name: task-broker
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  trialconnect-core:
+    build:
+      context: ./trialconnect-core
+    container_name: trialconnect-core
+    env_file:
+      - .env
+    depends_on:
+      task-broker:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: >
+      sh -c "until python -c \"import os,socket; s=socket.socket(); s.settimeout(2); s.connect((os.environ.get('POSTGRES_HOST','clinical-data-store'), int(os.environ.get('POSTGRES_PORT','5432')))); s.close(); print('db ready')\"; do echo 'Waiting for PostgreSQL'; sleep 2; done; until python -c \"import socket; s=socket.socket(); s.settimeout(2); s.connect(('task-broker', 6379)); s.close(); print('redis ready')\"; do echo 'Waiting for Redis'; sleep 2; done; alembic upgrade head && python -m app.database.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health').read()"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  patient-portal:
+    build:
+      context: ./patient-portal
+    container_name: patient-portal
+    env_file:
+      - .env
+    environment:
+      VITE_CORE_API_URL: http://localhost:8000/api/v1
+      VITE_CORE_WS_URL: ws://localhost:8000/ws/v1
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - trialconnect-core
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 3000"
+
+  coordinator-workbench:
+    build:
+      context: ./coordinator-workbench
+    container_name: coordinator-workbench
+    env_file:
+      - .env
+    environment:
+      VITE_CORE_API_URL: http://localhost:8000/api/v1
+      VITE_CORE_WS_URL: ws://localhost:8000/ws/v1
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      - trialconnect-core
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 3001"
+
+  trialconnect-worker:
+    build:
+      context: ./trialconnect-core
+    container_name: trialconnect-worker
+    env_file:
+      - .env
+    depends_on:
+      task-broker:
+        condition: service_healthy
+      trialconnect-core:
+        condition: service_healthy
+    command: >
+      celery -A app.worker:celery_app worker --beat --loglevel=info --concurrency=1 --uid=nobody --gid=nogroup --schedule=/tmp/celerybeat-schedule
+
+volumes:
+  pgdata:
