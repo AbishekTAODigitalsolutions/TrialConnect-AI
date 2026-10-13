@@ -55,3 +55,35 @@ class PatientNotification(Base):
         nullable=False,
     )
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AppointmentEmailDelivery(Base):
+    __tablename__ = "appointment_email_deliveries"
+    __table_args__ = (
+        UniqueConstraint("appointment_id", "email_type", name="uq_appointment_email_type"),
+        Index("ix_appointment_email_deliveries_due", "status", "next_attempt_at", "scheduled_for"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("patients.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    appointment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("appointments.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    email_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    recipient_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(default=0, nullable=False)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )

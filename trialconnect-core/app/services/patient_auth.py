@@ -24,7 +24,7 @@ def validate_auth_secret() -> str:
     if len(secret.encode("utf-8")) < 32:
         raise HTTPException(
             status_code=503,
-            detail="Patient authentication is not configured. Set AUTH_SECRET to at least 32 bytes.",
+            detail="Session authentication is not configured. Set AUTH_SECRET to at least 32 bytes.",
         )
     return secret
 
@@ -61,23 +61,25 @@ def verify_password(password: str, stored_hash: str) -> bool:
         return False
 
 
-def hash_invite_code(code: str) -> str:
-    return hashlib.sha256(code.encode("utf-8")).hexdigest()
-
-
 def create_access_token(patient_id: UUID) -> str:
+    return _create_access_token({"sub": str(patient_id), "typ": "patient"})
+
+
+def _create_access_token(claims: dict[str, str | int]) -> str:
     secret = validate_auth_secret()
+    claims["exp"] = int(time.time()) + settings.AUTH_TOKEN_TTL_SECONDS
     payload = _b64encode(
-        json.dumps(
-            {"sub": str(patient_id), "exp": int(time.time()) + settings.AUTH_TOKEN_TTL_SECONDS},
-            separators=(",", ":"),
-        ).encode("utf-8")
+        json.dumps(claims, separators=(",", ":")).encode("utf-8")
     )
     signature = hmac.new(secret.encode("utf-8"), payload.encode("ascii"), hashlib.sha256).digest()
     return f"{payload}.{_b64encode(signature)}"
 
 
-def patient_id_from_token(token: str) -> UUID:
+def create_coordinator_access_token(coordinator_id: UUID) -> str:
+    return _create_access_token({"sub": str(coordinator_id), "typ": "coordinator"})
+
+
+def _subject_from_token(token: str, expected_type: str) -> UUID:
     try:
         payload, signature_text = token.split(".", maxsplit=1)
         expected_signature = hmac.new(
@@ -90,9 +92,19 @@ def patient_id_from_token(token: str) -> UUID:
         claims = json.loads(_b64decode(payload))
         if claims["exp"] <= int(time.time()):
             raise ValueError("Expired session")
+        if claims.get("typ", "patient") != expected_type:
+            raise ValueError("Unexpected session type")
         return UUID(claims["sub"])
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired login session.") from exc
+
+
+def patient_id_from_token(token: str) -> UUID:
+    return _subject_from_token(token, "patient")
+
+
+def coordinator_id_from_token(token: str) -> UUID:
+    return _subject_from_token(token, "coordinator")
 
 
 async def require_patient(

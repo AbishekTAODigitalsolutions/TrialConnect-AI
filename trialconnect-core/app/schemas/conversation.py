@@ -27,6 +27,20 @@ class MessageRead(BaseModel):
     sender: Literal["patient", "coordinator"]
     body: str
     created_at: datetime
+    read_at: datetime | None
+
+
+class MessageReadRequest(BaseModel):
+    message_ids: list[UUID] = Field(min_length=1, max_length=200)
+
+
+class CoordinatorUnreadMessage(BaseModel):
+    id: UUID
+    patient_id: UUID
+    patient_given_name: str
+    patient_family_name: str
+    body: str
+    created_at: datetime
 
 
 class AssistantQuestion(BaseModel):

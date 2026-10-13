@@ -8,11 +8,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
-from app.models.appointment import Appointment, PatientNotification
+from app.models.appointment import Appointment, AppointmentEmailDelivery, PatientNotification
 from app.models.participant import Patient
-from app.schemas.appointment import AppointmentCreate, AppointmentRead, PatientNotificationRead
+from app.schemas.appointment import (
+    AppointmentCreate,
+    AppointmentEmailDeliveryRead,
+    AppointmentRead,
+    CoordinatorAppointmentRead,
+    PatientNotificationRead,
+)
+from app.services.appointment_email import appointment_email_values
 from app.services.patient_auth import require_patient
+from app.services.coordinator_auth import require_coordinator
+from app.models.coordinator_account import CoordinatorAccount
 
 patient_router = APIRouter(tags=["patient appointments and reminders"])
 coordinator_router = APIRouter(tags=["coordinator appointments"])
@@ -21,12 +31,13 @@ audit_logger = structlog.get_logger("audit")
 
 @coordinator_router.get(
     "/coordinator/patients/{patient_id}/appointments",
-    response_model=list[AppointmentRead],
+    response_model=list[CoordinatorAppointmentRead],
 )
 async def coordinator_patient_appointments(
     patient_id: UUID,
+    _coordinator: CoordinatorAccount = Depends(require_coordinator),
     session: AsyncSession = Depends(get_db),
-) -> list[Appointment]:
+) -> list[CoordinatorAppointmentRead]:
     patient = await session.get(Patient, patient_id)
     if patient is None:
         raise HTTPException(status_code=404, detail="Patient not found.")
@@ -39,19 +50,20 @@ async def coordinator_patient_appointments(
         )
         .order_by(Appointment.starts_at)
     )
-    return list(result.all())
+    return await _coordinator_appointment_reads(session, list(result.all()))
 
 
 @coordinator_router.post(
     "/coordinator/patients/{patient_id}/appointments",
-    response_model=AppointmentRead,
+    response_model=CoordinatorAppointmentRead,
     status_code=status.HTTP_201_CREATED,
 )
 async def schedule_patient_appointment(
     patient_id: UUID,
     request: AppointmentCreate,
+    _coordinator: CoordinatorAccount = Depends(require_coordinator),
     session: AsyncSession = Depends(get_db),
-) -> Appointment:
+) -> CoordinatorAppointmentRead:
     patient = await session.get(Patient, patient_id)
     if patient is None or not patient.is_active:
         raise HTTPException(status_code=404, detail="Active patient not found.")
@@ -64,6 +76,25 @@ async def schedule_patient_appointment(
         status="scheduled",
     )
     session.add(appointment)
+    await session.flush()
+    current_time = datetime.now(UTC)
+    appointment_details = f"scheduled for {appointment.starts_at.isoformat()}"
+    if appointment.location:
+        appointment_details += f" at {appointment.location}"
+    session.add(
+        PatientNotification(
+            patient_id=patient.id,
+            appointment_id=appointment.id,
+            reminder_type="scheduled",
+            title="Appointment scheduled",
+            body=f"Your {appointment.title.lower()} is {appointment_details}.",
+            scheduled_for=current_time,
+        )
+    )
+    session.add_all(
+        AppointmentEmailDelivery(**values)
+        for values in appointment_email_values(appointment, patient.email, current_time)
+    )
     await session.commit()
     await session.refresh(appointment)
     audit_logger.info(
@@ -72,7 +103,43 @@ async def schedule_patient_appointment(
         appointment_id=str(appointment.id),
         starts_at=appointment.starts_at.isoformat(),
     )
-    return appointment
+    return (await _coordinator_appointment_reads(session, [appointment]))[0]
+
+
+async def _coordinator_appointment_reads(
+    session: AsyncSession,
+    appointments: list[Appointment],
+) -> list[CoordinatorAppointmentRead]:
+    if not appointments:
+        return []
+    deliveries_result = await session.scalars(
+        select(AppointmentEmailDelivery)
+        .where(AppointmentEmailDelivery.appointment_id.in_([item.id for item in appointments]))
+        .order_by(AppointmentEmailDelivery.scheduled_for)
+    )
+    deliveries_by_appointment: dict[UUID, list[AppointmentEmailDeliveryRead]] = {}
+    for delivery in deliveries_result.all():
+        deliveries_by_appointment.setdefault(delivery.appointment_id, []).append(
+            AppointmentEmailDeliveryRead(
+                id=delivery.id,
+                email_type=delivery.email_type,
+                scheduled_for=delivery.scheduled_for,
+                status=delivery.status,
+                attempts=delivery.attempts,
+                last_attempt_at=delivery.last_attempt_at,
+                sent_at=delivery.sent_at,
+                last_error=delivery.last_error,
+                smtp_configured=settings.smtp_configured,
+            )
+        )
+
+    return [
+        CoordinatorAppointmentRead(
+            **AppointmentRead.model_validate(appointment).model_dump(),
+            email_deliveries=deliveries_by_appointment.get(appointment.id, []),
+        )
+        for appointment in appointments
+    ]
 
 
 @patient_router.get("/appointments", response_model=list[AppointmentRead])

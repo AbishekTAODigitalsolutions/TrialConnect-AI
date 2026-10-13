@@ -24,16 +24,25 @@ class Settings(BaseSettings):
     REQUIRE_PGVECTOR: bool = True
     AUTH_SECRET: str = ""
     AUTH_TOKEN_TTL_SECONDS: int = 3600
-    PATIENT_INVITE_TTL_HOURS: int = 72
+    COORDINATOR_ADMIN_EMAIL: str = ""
+    COORDINATOR_ADMIN_NAME: str = "Clinical Connect Administrator"
+    COORDINATOR_ADMIN_PASSWORD: str = ""
     DEFAULT_STUDY_ID: str = "STUDY-001"
     DEFAULT_SITE_ID: str = "SITE-01"
     APPOINTMENT_REMINDER_POLL_SECONDS: int = 60
+    SMTP_ENABLED: bool = False
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_USE_STARTTLS: bool = True
     REDIS_HOST: str = "task-broker"
     REDIS_PORT: int = 6379
     LLM_ENABLED: bool = False
-    LLM_PROVIDER: str = "openai"
-    OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = ""
+    LLM_PROVIDER: str = "ollama"
+    OLLAMA_BASE_URL: str = "http://host.docker.internal:11434"
+    OLLAMA_MODEL: str = "qwen3:4b"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -58,6 +67,16 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def smtp_configured(self) -> bool:
+        credentials_are_complete = bool(self.SMTP_USERNAME) == bool(self.SMTP_PASSWORD)
+        return (
+            self.SMTP_ENABLED
+            and bool(self.SMTP_HOST.strip())
+            and bool(self.SMTP_FROM_EMAIL.strip())
+            and credentials_are_complete
+        )
 
 
 settings = Settings()

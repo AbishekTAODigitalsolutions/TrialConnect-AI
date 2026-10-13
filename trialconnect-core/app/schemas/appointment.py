@@ -49,12 +49,30 @@ class AppointmentRead(BaseModel):
     created_at: datetime
 
 
+class AppointmentEmailDeliveryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    email_type: Literal["confirmation", "reminder_24_hours"]
+    scheduled_for: datetime
+    status: Literal["pending", "sending", "sent", "failed"]
+    attempts: int
+    last_attempt_at: datetime | None
+    sent_at: datetime | None
+    last_error: str | None
+    smtp_configured: bool
+
+
+class CoordinatorAppointmentRead(AppointmentRead):
+    email_deliveries: list[AppointmentEmailDeliveryRead] = Field(default_factory=list)
+
+
 class PatientNotificationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     appointment_id: UUID
-    reminder_type: Literal["48_hours", "24_hours"]
+    reminder_type: Literal["scheduled", "48_hours", "24_hours"]
     title: str
     body: str
     scheduled_for: datetime

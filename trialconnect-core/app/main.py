@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import time
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
 import structlog
@@ -12,11 +14,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.patient_auth import router as patient_auth_router
+from app.api.coordinator_auth import router as coordinator_auth_router
 from app.api.appointments import (
     coordinator_router as coordinator_appointments_router,
     patient_router as patient_appointments_router,
 )
 from app.api.conversations import (
+    coordinator_notification_router,
     coordinator_router as coordinator_conversations_router,
     faq_router,
     patient_router as patient_conversations_router,
@@ -27,9 +31,18 @@ from app.database import check_database, check_vector_extension
 from app.dependencies import check_redis
 from app.logging_config import configure_logging
 from app.services.audit_service import AuditService
+from app.services.coordinator_bootstrap import bootstrap_coordinator_admin
 
 configure_logging()
-app = FastAPI(title=settings.PROJECT_NAME, version=settings.APP_VERSION)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    await bootstrap_coordinator_admin()
+    yield
+
+
+app = FastAPI(title=settings.PROJECT_NAME, version=settings.APP_VERSION, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -40,10 +53,12 @@ app.add_middleware(
 audit_service = AuditService()
 logger = structlog.get_logger("api")
 app.include_router(patient_auth_router, prefix="/api/v1")
+app.include_router(coordinator_auth_router, prefix="/api/v1")
 app.include_router(patient_appointments_router, prefix="/api/v1")
 app.include_router(coordinator_appointments_router, prefix="/api/v1")
 app.include_router(patient_conversations_router, prefix="/api/v1")
 app.include_router(coordinator_conversations_router, prefix="/api/v1")
+app.include_router(coordinator_notification_router, prefix="/api/v1")
 app.include_router(faq_router, prefix="/api/v1")
 app.include_router(patients_router, prefix="/api/v1/patients")
 app.include_router(

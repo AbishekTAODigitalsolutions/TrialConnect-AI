@@ -6,17 +6,19 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class PatientSignup(BaseModel):
-    given_name: str = Field(min_length=1, max_length=128)
-    family_name: str = Field(min_length=1, max_length=128)
+    given_name: str | None = Field(default=None, max_length=128)
+    family_name: str | None = Field(default=None, max_length=128)
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=12, max_length=128)
 
     @field_validator("given_name", "family_name")
     @classmethod
-    def validate_name(cls, value: str) -> str:
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         value = value.strip()
         if not value:
-            raise ValueError("name must not be blank")
+            return None
         return value
 
     @field_validator("email")
@@ -31,17 +33,6 @@ class PatientSignup(BaseModel):
 class PatientLogin(BaseModel):
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=1, max_length=128)
-
-    @field_validator("email")
-    @classmethod
-    def normalize_email(cls, value: str) -> str:
-        return value.strip().lower()
-
-
-class PatientActivation(BaseModel):
-    email: str = Field(min_length=3, max_length=255)
-    invite_code: str = Field(min_length=16, max_length=128)
-    password: str = Field(min_length=12, max_length=128)
 
     @field_validator("email")
     @classmethod
@@ -64,8 +55,3 @@ class PatientSession(BaseModel):
     access_token: str
     token_type: str = "bearer"
     patient: AuthenticatedPatient
-
-
-class PatientInviteCreated(BaseModel):
-    invite_code: str
-    expires_at: str

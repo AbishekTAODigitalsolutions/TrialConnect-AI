@@ -9,8 +9,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.coordinator_account import CoordinatorAccount
 from app.models.participant import Patient
 from app.schemas.participant import PatientRead, PatientUpdate
+from app.services.coordinator_auth import require_coordinator
 
 router = APIRouter(tags=["patients"])
 audit_logger = structlog.get_logger("audit")
@@ -23,6 +25,7 @@ async def list_patients(
     is_active: bool | None = None,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    _coordinator: CoordinatorAccount = Depends(require_coordinator),
     session: AsyncSession = Depends(get_db),
 ) -> list[Patient]:
     query = select(Patient)
@@ -42,6 +45,7 @@ async def list_patients(
 @router.get("/{patient_id}", response_model=PatientRead)
 async def get_patient(
     patient_id: UUID,
+    _coordinator: CoordinatorAccount = Depends(require_coordinator),
     session: AsyncSession = Depends(get_db),
 ) -> Patient:
     patient = await session.get(Patient, patient_id)
@@ -55,6 +59,7 @@ async def get_patient(
 async def update_patient(
     patient_id: UUID,
     patient_data: PatientUpdate,
+    _coordinator: CoordinatorAccount = Depends(require_coordinator),
     session: AsyncSession = Depends(get_db),
 ) -> Patient:
     patient = await session.get(Patient, patient_id)
@@ -81,6 +86,7 @@ async def update_patient(
 @router.delete("/{patient_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_patient(
     patient_id: UUID,
+    _coordinator: CoordinatorAccount = Depends(require_coordinator),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
     patient = await session.get(Patient, patient_id)

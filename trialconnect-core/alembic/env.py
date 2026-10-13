@@ -11,6 +11,7 @@ from app.config import settings
 from app.models.base import Base
 from app.models import appointment as appointment_models
 from app.models import conversation as conversation_models
+from app.models import coordinator_account as coordinator_models
 from app.models import patient_account as patient_account_models
 from app.models import participant as patient_models
 

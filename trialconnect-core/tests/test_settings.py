@@ -6,6 +6,8 @@ def test_settings_default_values(monkeypatch) -> None:
     settings = Settings(_env_file=None)
     assert settings.PROJECT_NAME == "Clinical Connect AI"
     assert settings.LLM_ENABLED is False
+    assert settings.LLM_PROVIDER == "ollama"
+    assert settings.OLLAMA_MODEL == "qwen3:4b"
 
 
 def test_database_url_escapes_reserved_password_characters() -> None:
